@@ -205,8 +205,10 @@ async function sendStatus(chatId, env) {
       (aDone ? "✅" : "▫️") + " " + pair.member_a_name + "\n" +
       (bDone ? "✅" : "▫️") + " " + pair.member_b_name;
 
+  const titleUpdated = await updateGroupTitle(env, chatId, pair.chat_title, pair.current_streak);
   await sendMessage(env, chatId,
-    `╔══════════════════╗\n          🔥 ВАШ ОГОНЁК\n╚══════════════════╝\n\n🔥 ${pair.current_streak} ${pluralDays(pair.current_streak)} подряд\n🏆 Рекорд: ${pair.best_streak} ${pluralDays(pair.best_streak)}\n\n${state}\n\n📅 Последний общий день: ${pair.last_completed_day || "пока нет"}`
+    `╔══════════════════╗\n          🔥 ВАШ ОГОНЁК\n╚══════════════════╝\n\n🔥 ${pair.current_streak} ${pluralDays(pair.current_streak)} подряд\n🏆 Рекорд: ${pair.best_streak} ${pluralDays(pair.best_streak)}\n\n${state}\n\n📅 Последний общий день: ${pair.last_completed_day || "пока нет"}` +
+    (titleUpdated ? "\\n\\n✅ Название группы обновлено." : "\\n\\n⚠️ Не удалось изменить название. Проверьте, что бот — администратор и ему разрешено менять информацию о группе.")
   );
 }
 
