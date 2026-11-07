@@ -1,4 +1,5 @@
 const DAY_MS = 24 * 60 * 60 * 1000;
+const WORKER_URL = "https://streak-fire.m03555750.workers.dev";
 
 export default {
   async fetch(request, env) {
@@ -8,23 +9,53 @@ export default {
       return new Response("STREAK bot is running 🔥");
     }
 
+    // One-time browser setup page. The secret is submitted in the POST body, not the URL.
+    if (url.pathname === "/setup" && request.method === "GET") {
+      return new Response(`<!doctype html><html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>STREAK setup</title><body style="font:16px Arial;max-width:480px;margin:40px auto;padding:16px"><h2>Подключение STREAK 🔥</h2><p>Введи значение TELEGRAM_WEBHOOK_SECRET, которое ты сохранил в Cloudflare.</p><form method="post" action="/setup"><input name="secret" type="password" required autocomplete="off" placeholder="Webhook secret" style="box-sizing:border-box;width:100%;padding:12px;margin:12px 0"><button style="padding:12px 18px">Подключить Telegram</button></form></body></html>`, {
+        headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" }
+      });
+    }
+
+    if (url.pathname === "/setup" && request.method === "POST") {
+      if (!env.TELEGRAM_BOT_TOKEN || !env.TELEGRAM_WEBHOOK_SECRET) {
+        return new Response("В Cloudflare не настроены обязательные Secrets.", { status: 500 });
+      }
+      const form = await request.formData();
+      if (form.get("secret") !== env.TELEGRAM_WEBHOOK_SECRET) {
+        return new Response("Неверный секрет. Проверь значение в Cloudflare.", { status: 403 });
+      }
+      const response = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/setWebhook`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          url: WORKER_URL + "/telegram",
+          secret_token: env.TELEGRAM_WEBHOOK_SECRET,
+          allowed_updates: ["message"]
+        })
+      });
+      const result = await response.json();
+      if (!response.ok || !result.ok) {
+        return new Response("Telegram не принял webhook: " + (result.description || response.status), { status: 502 });
+      }
+      return new Response("Готово! Telegram подключён к STREAK 🔥 Можно закрыть эту страницу и открыть бота в Telegram.", {
+        headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" }
+      });
+    }
+
     if (request.method === "POST" && url.pathname === "/telegram") {
       if (!env.TELEGRAM_BOT_TOKEN || !env.TELEGRAM_WEBHOOK_SECRET || !env.DB) {
         return new Response("Missing configuration", { status: 500 });
       }
-
       const suppliedSecret = request.headers.get("X-Telegram-Bot-Api-Secret-Token");
       if (suppliedSecret !== env.TELEGRAM_WEBHOOK_SECRET) {
         return new Response("Unauthorized", { status: 401 });
       }
-
       let update;
       try {
         update = await request.json();
       } catch {
         return new Response("Invalid JSON", { status: 400 });
       }
-
       try {
         if (update.message) await handleMessage(update.message, env);
       } catch (error) {
@@ -32,7 +63,6 @@ export default {
       }
       return new Response("OK");
     }
-
     return new Response("Not found", { status: 404 });
   },
 };
@@ -41,7 +71,6 @@ async function handleMessage(message, env) {
   const chat = message.chat;
   const sender = message.from;
   const text = (message.text || "").trim();
-
   if (!chat || !sender || sender.is_bot || !["group", "supergroup"].includes(chat.type)) return;
 
   if (text.startsWith("/start")) {
@@ -50,12 +79,10 @@ async function handleMessage(message, env) {
     );
     return;
   }
-
   if (text.startsWith("/pair")) {
     await pairMember(message, env);
     return;
   }
-
   if (text.startsWith("/status")) {
     await sendStatus(chat.id, env);
     return;
@@ -64,7 +91,6 @@ async function handleMessage(message, env) {
   const pair = await env.DB.prepare("SELECT * FROM pairs WHERE chat_id = ?")
     .bind(String(chat.id)).first();
   if (!pair) return;
-
   const userId = String(sender.id);
   if (userId !== pair.member_a_id && userId !== pair.member_b_id) return;
 
@@ -72,11 +98,9 @@ async function handleMessage(message, env) {
   await env.DB.prepare(
     "INSERT OR IGNORE INTO daily_activity (pair_id, user_id, activity_day) VALUES (?, ?, ?)"
   ).bind(pair.id, userId, day).run();
-
   const rows = await env.DB.prepare(
     "SELECT user_id FROM daily_activity WHERE pair_id = ? AND activity_day = ?"
   ).bind(pair.id, day).all();
-
   const activeIds = new Set((rows.results || []).map(row => row.user_id));
   if (activeIds.has(pair.member_a_id) && activeIds.has(pair.member_b_id)) {
     await completeDay(pair, day, env);
@@ -89,53 +113,38 @@ async function pairMember(message, env) {
   const chatId = String(chat.id);
   const userId = String(sender.id);
   const displayName = [sender.first_name, sender.last_name].filter(Boolean).join(" ") || sender.username || "Участник";
-
-  const existing = await env.DB.prepare("SELECT * FROM pairs WHERE chat_id = ?")
-    .bind(chatId).first();
-
+  const existing = await env.DB.prepare("SELECT * FROM pairs WHERE chat_id = ?").bind(chatId).first();
   if (existing) {
     await sendMessage(env, chat.id, "В этой группе огонёк уже настроен 🔥 Напишите /status.");
     return;
   }
-
-  const pending = await env.DB.prepare("SELECT * FROM pending_pairs WHERE chat_id = ?")
-    .bind(chatId).first();
-
+  const pending = await env.DB.prepare("SELECT * FROM pending_pairs WHERE chat_id = ?").bind(chatId).first();
   if (!pending) {
     await env.DB.prepare(
       "INSERT OR REPLACE INTO pending_pairs (chat_id, chat_title, first_user_id, first_user_name) VALUES (?, ?, ?, ?)"
     ).bind(chatId, chat.title || "Telegram group", userId, displayName).run();
-    await sendMessage(env, chat.id,
-      `${displayName} начал создание огонька! 🔥 Теперь второму человеку нужно отправить /pair в этой группе.`
-    );
+    await sendMessage(env, chat.id, `${displayName} начал создание огонька! 🔥 Теперь второму человеку нужно отправить /pair в этой группе.`);
     return;
   }
-
   if (pending.first_user_id === userId) {
     await sendMessage(env, chat.id, "Теперь пусть второй участник отправит /pair 🔥");
     return;
   }
-
   await env.DB.prepare(
     "INSERT INTO pairs (chat_id, chat_title, member_a_id, member_a_name, member_b_id, member_b_name) VALUES (?, ?, ?, ?, ?, ?)"
   ).bind(chatId, pending.chat_title, pending.first_user_id, pending.first_user_name, userId, displayName).run();
-
   await env.DB.prepare("DELETE FROM pending_pairs WHERE chat_id = ?").bind(chatId).run();
-
   await sendMessage(env, chat.id,
     `Готово! 🔥 Огонёк создан между ${pending.first_user_name} и ${displayName}. Теперь каждый день отправляйте друг другу сообщения в этой группе — я буду считать общие дни автоматически.`
   );
 }
 
 async function sendStatus(chatId, env) {
-  const pair = await env.DB.prepare("SELECT * FROM pairs WHERE chat_id = ?")
-    .bind(String(chatId)).first();
-
+  const pair = await env.DB.prepare("SELECT * FROM pairs WHERE chat_id = ?").bind(String(chatId)).first();
   if (!pair) {
     await sendMessage(env, chatId, "Огонёк ещё не настроен. Оба участника должны по очереди отправить /pair 🔥");
     return;
   }
-
   await sendMessage(env, chatId,
     `🔥 Огонёк: ${pair.member_a_name} + ${pair.member_b_name}\nТекущая серия: ${pair.current_streak} ${pluralDays(pair.current_streak)}\nЛучшая серия: ${pair.best_streak} ${pluralDays(pair.best_streak)}\nПоследний общий день: ${pair.last_completed_day || "пока нет"}`
   );
@@ -143,19 +152,14 @@ async function sendStatus(chatId, env) {
 
 async function completeDay(pair, day, env) {
   if (pair.last_completed_day === day) return;
-
   const yesterday = new Date(Date.parse(day + "T00:00:00Z") - DAY_MS).toISOString().slice(0, 10);
   const nextStreak = pair.last_completed_day === yesterday ? pair.current_streak + 1 : 1;
   const best = Math.max(pair.best_streak, nextStreak);
-
   const result = await env.DB.prepare(
     "UPDATE pairs SET current_streak = ?, best_streak = ?, last_completed_day = ? WHERE id = ? AND (last_completed_day IS NULL OR last_completed_day != ?)"
   ).bind(nextStreak, best, day, pair.id, day).run();
-
   if (result.meta?.changes) {
-    await sendMessage(env, pair.chat_id,
-      `🔥 Огонёк сохранён! У вас уже ${nextStreak} ${pluralDays(nextStreak)} вместе!`
-    );
+    await sendMessage(env, pair.chat_id, `🔥 Огонёк сохранён! У вас уже ${nextStreak} ${pluralDays(nextStreak)} вместе!`);
   }
 }
 
@@ -172,13 +176,10 @@ function pluralDays(number) {
 }
 
 async function sendMessage(env, chatId, text) {
-  const response = await fetch(
-    `https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`,
-    {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ chat_id: chatId, text }),
-    }
-  );
+  const response = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ chat_id: chatId, text }),
+  });
   if (!response.ok) console.error("Telegram sendMessage failed:", await response.text());
 }
