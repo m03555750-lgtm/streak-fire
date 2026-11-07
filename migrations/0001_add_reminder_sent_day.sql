@@ -1,0 +1,1 @@
+ALTER TABLE pairs ADD COLUMN reminder_sent_day TEXT;
