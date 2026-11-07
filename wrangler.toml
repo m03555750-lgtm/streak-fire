@@ -1,6 +1,6 @@
 name = "streak-fire"
 main = "src/index.js"
-compatibility_date = "2026-11-08"
+compatibility_date = "2025-01-01"
 
 [[d1_databases]]
 binding = "DB"
