@@ -9,8 +9,13 @@ export default {
     }
 
     if (request.method === "POST" && url.pathname === "/telegram") {
-      if (!env.TELEGRAM_BOT_TOKEN || !env.DB) {
+      if (!env.TELEGRAM_BOT_TOKEN || !env.TELEGRAM_WEBHOOK_SECRET || !env.DB) {
         return new Response("Missing configuration", { status: 500 });
+      }
+
+      const suppliedSecret = request.headers.get("X-Telegram-Bot-Api-Secret-Token");
+      if (suppliedSecret !== env.TELEGRAM_WEBHOOK_SECRET) {
+        return new Response("Unauthorized", { status: 401 });
       }
 
       let update;
