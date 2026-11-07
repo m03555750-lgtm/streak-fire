@@ -2,6 +2,9 @@ name = "streak-fire"
 main = "src/index.js"
 compatibility_date = "2025-01-01"
 
+[triggers]
+crons = ["0 18 * * *"]
+
 [[d1_databases]]
 binding = "DB"
 database_name = "streak-db"
