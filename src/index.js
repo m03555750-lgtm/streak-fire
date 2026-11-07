@@ -300,11 +300,25 @@ async function verifyStorySignature(secret, chatId, expires, signature) {
 }
 async function sendStoryLink(chatId, env) {
   const pair = await env.DB.prepare("SELECT * FROM pairs WHERE chat_id = ?").bind(String(chatId)).first();
-  if (!pair) { await sendMessage(env, chatId, "Сначала создайте общий огонёк командой /pair 🔥"); return; }
+  if (!pair) {
+    await sendMessage(env, chatId, "Сначала создайте общий огонёк командой /pair 🔥");
+    return;
+  }
   const expires = Math.floor(Date.now() / 1000) + 86400;
   const signature = await signStoryPayload(env.TELEGRAM_WEBHOOK_SECRET, String(chatId), expires);
   const link = `${WORKER_URL}/story?chat=${encodeURIComponent(chatId)}&exp=${expires}&sig=${signature}`;
-  await sendMessage(env, chatId, `🔥 Ваша карточка огонька готова!\\n\\nОткройте ссылку на телефоне, сделайте скриншот карточки и добавьте его в историю Telegram:\\n${link}\\n\\nСсылка действует 24 часа.`);
+  const response = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      chat_id: chatId,
+      text: "🔥 Ваша карточка огонька готова!\n\nНажмите кнопку ниже, чтобы открыть её. Ссылка действует 24 часа.",
+      reply_markup: {
+        inline_keyboard: [[{ text: "🔥 Открыть карточку", url: link }]]
+      }
+    })
+  });
+  if (!response.ok) console.error("Telegram story message failed:", await response.text());
 }
 function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>"']/g, char => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" })[char]);
