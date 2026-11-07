@@ -324,8 +324,85 @@ function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>"']/g, char => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" })[char]);
 }
 function renderStoryPage(pair) {
-  const a=escapeHtml(pair.member_a_name), b=escapeHtml(pair.member_b_name), group=escapeHtml(pair.chat_title || "Наша группа");
-  const days=Number(pair.current_streak)||0, best=Number(pair.best_streak)||0;
-  return `<!doctype html><html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1"><title>STREAK 🔥</title><style>
-  *{box-sizing:border-box}html,body{margin:0;min-height:100%;font-family:Arial,sans-serif;background:#100d1c;color:white}body{display:flex;justify-content:center;align-items:center;padding:14px}.card{position:relative;width:min(100%,430px);aspect-ratio:9/16;overflow:hidden;border-radius:28px;padding:12% 8%;display:flex;flex-direction:column;align-items:center;justify-content:space-between;text-align:center;background:radial-gradient(ellipse at 50% 42%,#71341f 0,#311b35 42%,#100d1c 78%);border:1px solid #ffffff24;isolation:isolate}.card:before,.card:after{content:"✦  ·  ✧   ·    ✦";position:absolute;inset:0;z-index:0;color:#ffd49a;font-size:22px;letter-spacing:22px;line-height:2.8;opacity:0;pointer-events:none;animation:sparks 3.2s ease-in-out infinite}.card:after{animation-delay:1.6s;transform:translateY(12px) rotate(8deg);color:#ff8a45}.glow{position:absolute;width:75%;aspect-ratio:1;border-radius:50%;top:27%;background:#ff6a24;filter:blur(80px);opacity:.35;animation:glow 2s ease-in-out infinite alternate}.top,.middle,.bottom{position:relative;z-index:1}.brand{font-size:14px;letter-spacing:5px;font-weight:bold;color:#ffd2a1}.group{font-size:15px;color:#f4d9cb;margin-top:14px}.fire{font-size:clamp(100px,27vw,150px);line-height:1.2;filter:drop-shadow(0 0 22px #ff742d);transform-origin:50% 80%;animation:flame 1.25s ease-in-out infinite}.days{font-size:clamp(58px,16vw,82px);font-weight:900;line-height:1;color:#fff;animation:pop 1.8s ease-in-out infinite}.label{font-size:19px;color:#ffd8c0;margin-top:10px}.names{font-size:22px;font-weight:bold;line-height:1.5;margin-top:28px}.heart{color:#ff8064;display:inline-block;animation:heartbeat 1s ease-in-out infinite}.best{margin-top:28px;padding:12px 20px;border:1px solid #ffffff35;border-radius:30px;background:#ffffff12;font-size:16px}.bottom{font-size:13px;letter-spacing:3px;color:#f5c5a9;animation:shine 2.4s ease-in-out infinite}.hint{max-width:430px;text-align:center;color:#d9cbd5;font-size:13px;padding:12px 8px 0}@keyframes flame{0%,100%{transform:translateY(0) scale(1) rotate(-2deg)}50%{transform:translateY(-9px) scale(1.09) rotate(2deg)}}@keyframes heartbeat{0%,100%{transform:scale(1)}15%{transform:scale(1.25)}30%{transform:scale(1)}45%{transform:scale(1.16)}}@keyframes glow{from{opacity:.2;transform:scale(.85)}to{opacity:.55;transform:scale(1.15)}}@keyframes sparks{0%{opacity:0;transform:translateY(20px)}35%{opacity:.7}100%{opacity:0;transform:translateY(-24px)}}@keyframes pop{0%,100%{transform:scale(1)}50%{transform:scale(1.045)}}@keyframes shine{0%,100%{opacity:.65}50%{opacity:1}}@media(prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important}}</style><body><div><main class="card"><div class="glow"></div><header class="top"><div class="brand">STREAK</div><div class="group">${group}</div></header><section class="middle"><div class="fire">🔥</div><div class="days">${days}</div><div class="label">дней вместе</div><div class="names">${a}<br><span class="heart">❤️</span><br>${b}</div><div class="best">🏆 Рекорд: ${best} дн.</div></section><footer class="bottom">НАШ ОГОНЁК НЕ ГАСНЕТ</footer></main><div class="hint">Запиши 5–7 секунд экрана с этой анимацией и добавь видео в историю Telegram 🔥</div></div></body></html>`;
+  const a = JSON.stringify(String(pair.member_a_name || "Участник"));
+  const b = JSON.stringify(String(pair.member_b_name || "Участник"));
+  const group = JSON.stringify(String(pair.chat_title || "Наша группа"));
+  const days = Math.max(0, Number(pair.current_streak) || 0);
+  const best = Math.max(0, Number(pair.best_streak) || 0);
+  return \`<!doctype html><html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1"><title>STREAK 🔥</title>
+  <style>
+  *{box-sizing:border-box}body{margin:0;min-height:100vh;background:#100d1c;color:#fff;font-family:Arial,sans-serif;display:flex;align-items:center;justify-content:center;padding:16px}
+  .wrap{width:min(100%,430px);text-align:center}.preview{width:100%;aspect-ratio:9/16;border-radius:24px;overflow:hidden;box-shadow:0 12px 50px #0008;background:#211329}
+  canvas{display:block;width:100%;height:100%}.buttons{display:grid;gap:10px;margin-top:16px}
+  button{border:0;border-radius:14px;padding:15px 18px;font-size:16px;font-weight:700;background:#ff6b2c;color:white}
+  button.secondary{background:#ffffff18;border:1px solid #ffffff35}button:disabled{opacity:.55}
+  #status{font-size:13px;color:#e5c9bd;min-height:36px;padding:10px 4px 0;line-height:1.4}
+  video{display:none;width:100%;border-radius:16px;margin-top:12px}
+  </style><body><main class="wrap"><div class="preview"><canvas id="card" width="720" height="1280"></canvas></div>
+  <div class="buttons"><button id="make">🎬 Создать анимированное видео</button><button id="share" class="secondary" disabled>📲 Поделиться / в историю</button><button id="download" class="secondary" disabled>⬇️ Скачать видео</button></div>
+  <video id="result" controls playsinline></video><div id="status">Нажми «Создать анимированное видео». Через несколько секунд появится готовый ролик.</div></main>
+  <script>
+  const names=[${a},${b}], group=${group}, days=${days}, best=${best};
+  const canvas=document.getElementById('card'),ctx=canvas.getContext('2d');
+  const W=720,H=1280;let videoBlob=null,videoUrl=null;
+  function roundRect(x,y,w,h,r){ctx.beginPath();ctx.roundRect(x,y,w,h,r)}
+  function draw(t){
+    const pulse=1+Math.sin(t*2.8)*.045;
+    const bg=ctx.createRadialGradient(360,530,30,360,650,760);
+    bg.addColorStop(0,'#74371f');bg.addColorStop(.48,'#351c39');bg.addColorStop(1,'#100d1c');
+    ctx.fillStyle=bg;ctx.fillRect(0,0,W,H);
+    const glow=ctx.createRadialGradient(360,510,10,360,510,300);
+    glow.addColorStop(0,'rgba(255,111,35,.36)');glow.addColorStop(1,'rgba(255,111,35,0)');
+    ctx.fillStyle=glow;ctx.fillRect(0,180,W,700);
+    for(let i=0;i<34;i++){
+      const phase=(t*.55+i*.173)%1, x=(i*137+Math.sin(t+i)*65)%W, y=930-phase*900;
+      ctx.globalAlpha=(1-phase)*(.35+.4*Math.sin(t*3+i)**2);
+      ctx.fillStyle=i%2?'#ffd59b':'#ff793d';ctx.beginPath();ctx.arc(x,y,2+(i%4),0,Math.PI*2);ctx.fill();
+    }ctx.globalAlpha=1;
+    ctx.textAlign='center';ctx.fillStyle='#ffd2a1';ctx.font='bold 30px Arial';ctx.fillText('S T R E A K',360,105);
+    ctx.fillStyle='#f4d9cb';ctx.font='26px Arial';ctx.fillText(group.slice(0,36),360,155);
+    ctx.save();ctx.translate(360,440);ctx.scale(pulse,pulse);
+    ctx.shadowColor='#ff742d';ctx.shadowBlur=55;ctx.font='220px Arial';ctx.textBaseline='middle';ctx.fillText('🔥',0,0);ctx.restore();
+    ctx.shadowBlur=0;ctx.fillStyle='#fff';ctx.font='bold 150px Arial';ctx.fillText(String(days),360,735);
+    ctx.fillStyle='#ffd8c0';ctx.font='38px Arial';ctx.fillText('дней вместе',360,795);
+    ctx.fillStyle='#fff';ctx.font='bold 36px Arial';ctx.fillText(names[0].slice(0,24),360,900);
+    ctx.fillStyle='#ff8064';ctx.font='48px Arial';ctx.fillText('♥',360,965);
+    ctx.fillStyle='#fff';ctx.font='bold 36px Arial';ctx.fillText(names[1].slice(0,24),360,1025);
+    ctx.fillStyle='#ffffff18';roundRect(205,1080,310,68,34);ctx.fill();
+    ctx.strokeStyle='#ffffff55';ctx.lineWidth=2;roundRect(205,1080,310,68,34);ctx.stroke();
+    ctx.fillStyle='#ffe3bd';ctx.font='26px Arial';ctx.fillText('🏆 Рекорд: '+best+' дн.',360,1124);
+    ctx.fillStyle='#f5c5a9';ctx.font='bold 22px Arial';ctx.fillText('НАШ ОГОНЁК НЕ ГАСНЕТ',360,1215);
+  }
+  let rafStart=performance.now();function loop(now){draw((now-rafStart)/1000);requestAnimationFrame(loop)}requestAnimationFrame(loop);
+  const make=document.getElementById('make'),share=document.getElementById('share'),download=document.getElementById('download'),status=document.getElementById('status'),result=document.getElementById('result');
+  make.addEventListener('click',async()=>{
+    if(!canvas.captureStream||!window.MediaRecorder){status.textContent='Этот браузер не умеет создавать видео. Попробуй Chrome на телефоне.';return}
+    const stream=canvas.captureStream(30);
+    const mime=['video/webm;codecs=vp9','video/webm;codecs=vp8','video/webm'].find(type=>MediaRecorder.isTypeSupported(type));
+    if(!mime){status.textContent='Браузер не поддерживает запись видео в подходящем формате.';return}
+    const chunks=[];let recorder;
+    try{recorder=new MediaRecorder(stream,{mimeType:mime});}catch(e){status.textContent='Не удалось запустить запись видео.';return}
+    make.disabled=true;share.disabled=true;download.disabled=true;status.textContent='Создаю ролик на 7 секунд…';
+    recorder.ondataavailable=e=>{if(e.data&&e.data.size)chunks.push(e.data)};
+    recorder.onerror=()=>{make.disabled=false;status.textContent='Ошибка записи. Попробуй ещё раз.'};
+    recorder.onstop=()=>{
+      stream.getTracks().forEach(track=>track.stop());videoBlob=new Blob(chunks,{type:mime});
+      if(videoUrl)URL.revokeObjectURL(videoUrl);videoUrl=URL.createObjectURL(videoBlob);
+      result.src=videoUrl;result.style.display='block';share.disabled=false;download.disabled=false;make.disabled=false;
+      status.textContent='Готово! Нажми «Поделиться / в историю» и выбери Telegram. Если Telegram не предложит публикацию истории, сохрани видео и добавь его через создание истории вручную.';
+    };
+    recorder.start();setTimeout(()=>{if(recorder.state==='recording')recorder.stop()},7000);
+  });
+  download.addEventListener('click',()=>{
+    if(!videoBlob)return;const a=document.createElement('a');a.href=videoUrl;a.download='streak-fire.webm';a.click();
+  });
+  share.addEventListener('click',async()=>{
+    if(!videoBlob)return;const file=new File([videoBlob],'streak-fire.webm',{type:videoBlob.type});
+    try{
+      if(navigator.share&&(!navigator.canShare||navigator.canShare({files:[file]}))){
+        await navigator.share({files:[file],title:'Наш огонёк 🔥',text:'Наш STREAK — '+days+' дней вместе!'});
+      }else{download.click();status.textContent='Видео скачано. Открой Telegram → Истории → выбери это видео из галереи.'}
+    }catch(e){if(e.name!=='AbortError')status.textContent='Не удалось открыть меню отправки. Скачай видео и добавь его в историю вручную.'}
+  });
+  </script></body></html>\`;
 }
