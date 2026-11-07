@@ -1,3 +1,4 @@
+// Deployment fix: keep the story HTML template as a valid JavaScript template literal.
 const DAY_MS = 24 * 60 * 60 * 1000;
 const WORKER_URL = "https://streak-fire.m03555750.workers.dev";
 
