@@ -5,4 +5,4 @@ compatibility_date = "2026-11-08"
 [[d1_databases]]
 binding = "DB"
 database_name = "streak-db"
-database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"
+database_id = "6e72d729-866b-417e-a99c-1263e429bdc4"
