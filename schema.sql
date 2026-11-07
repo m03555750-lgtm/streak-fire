@@ -1,5 +1,3 @@
-PRAGMA foreign_keys = ON;
-
 CREATE TABLE IF NOT EXISTS pending_pairs (
   chat_id TEXT PRIMARY KEY,
   chat_title TEXT,
