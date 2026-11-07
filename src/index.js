@@ -329,7 +329,7 @@ function renderStoryPage(pair) {
   const group = JSON.stringify(String(pair.chat_title || "Наша группа"));
   const days = Math.max(0, Number(pair.current_streak) || 0);
   const best = Math.max(0, Number(pair.best_streak) || 0);
-  return \`<!doctype html><html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1"><title>STREAK 🔥</title>
+  return `<!doctype html><html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1"><title>STREAK 🔥</title>
   <style>
   *{box-sizing:border-box}body{margin:0;min-height:100vh;background:#100d1c;color:#fff;font-family:Arial,sans-serif;display:flex;align-items:center;justify-content:center;padding:16px}
   .wrap{width:min(100%,430px);text-align:center}.preview{width:100%;aspect-ratio:9/16;border-radius:24px;overflow:hidden;box-shadow:0 12px 50px #0008;background:#211329}
@@ -404,5 +404,5 @@ function renderStoryPage(pair) {
       }else{download.click();status.textContent='Видео скачано. Открой Telegram → Истории → выбери это видео из галереи.'}
     }catch(e){if(e.name!=='AbortError')status.textContent='Не удалось открыть меню отправки. Скачай видео и добавь его в историю вручную.'}
   });
-  </script></body></html>\`;
+  </script></body></html>`;
 }
