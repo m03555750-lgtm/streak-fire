@@ -178,6 +178,7 @@ async function pairMember(message, env) {
     "INSERT INTO pairs (chat_id, chat_title, member_a_id, member_a_name, member_b_id, member_b_name) VALUES (?, ?, ?, ?, ?, ?)"
   ).bind(chatId, pending.chat_title, pending.first_user_id, pending.first_user_name, userId, displayName).run();
   await env.DB.prepare("DELETE FROM pending_pairs WHERE chat_id = ?").bind(chatId).run();
+  await updateGroupTitle(env, chat.id, pending.chat_title, 0);
   await sendMessage(env, chat.id,
     `╔══════════════════╗\n       🔥 STREAK ЗАПУЩЕН!\n╚══════════════════╝\n${pending.first_user_name} ❤️ ${displayName}\n\nКаждый день пишите хотя бы одно сообщение в этой группе. Команда /status покажет ваш огонёк.`
   );
@@ -218,6 +219,7 @@ async function completeDay(pair, day, env) {
     "UPDATE pairs SET current_streak = ?, best_streak = ?, last_completed_day = ? WHERE id = ? AND (last_completed_day IS NULL OR last_completed_day != ?)"
   ).bind(nextStreak, best, day, pair.id, day).run();
   if (result.meta?.changes) {
+    await updateGroupTitle(env, pair.chat_id, pair.chat_title, nextStreak);
     await sendMessage(env, pair.chat_id,
       `🔥 ОГОНЁК СОХРАНЁН! 🔥\n\n${"🔥".repeat(Math.min(nextStreak, 10))}\n\nУ вас уже ${nextStreak} ${pluralDays(nextStreak)} вместе!\n🏆 Лучший результат: ${best} ${pluralDays(best)}`
     );
@@ -243,4 +245,22 @@ async function sendMessage(env, chatId, text) {
     body: JSON.stringify({ chat_id: chatId, text }),
   });
   if (!response.ok) console.error("Telegram sendMessage failed:", await response.text());
+}
+
+
+async function updateGroupTitle(env, chatId, originalTitle, streak) {
+  const suffix = ` 🔥 ${streak}`;
+  const base = (originalTitle || "Наша группа").slice(0, Math.max(1, 128 - suffix.length));
+  const title = base + suffix;
+  const response = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/setChatTitle`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ chat_id: chatId, title }),
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok || !result.ok) {
+    console.error("Telegram setChatTitle failed:", result.description || response.status);
+    return false;
+  }
+  return true;
 }
