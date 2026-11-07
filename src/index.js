@@ -1,0 +1,179 @@
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+export default {
+  async fetch(request, env) {
+    const url = new URL(request.url);
+
+    if (request.method === "GET" && url.pathname === "/") {
+      return new Response("STREAK bot is running 🔥");
+    }
+
+    if (request.method === "POST" && url.pathname === "/telegram") {
+      if (!env.TELEGRAM_BOT_TOKEN || !env.DB) {
+        return new Response("Missing configuration", { status: 500 });
+      }
+
+      let update;
+      try {
+        update = await request.json();
+      } catch {
+        return new Response("Invalid JSON", { status: 400 });
+      }
+
+      try {
+        if (update.message) await handleMessage(update.message, env);
+      } catch (error) {
+        console.error("Update handling failed:", error);
+      }
+      return new Response("OK");
+    }
+
+    return new Response("Not found", { status: 404 });
+  },
+};
+
+async function handleMessage(message, env) {
+  const chat = message.chat;
+  const sender = message.from;
+  const text = (message.text || "").trim();
+
+  if (!chat || !sender || sender.is_bot || !["group", "supergroup"].includes(chat.type)) return;
+
+  if (text.startsWith("/start")) {
+    await sendMessage(env, chat.id,
+      "Привет! 🔥 Чтобы завести общий огонёк, добавьте меня в группу с двумя участниками, отключите Group Privacy через @BotFather, затем каждый из вас по очереди отправьте /pair."
+    );
+    return;
+  }
+
+  if (text.startsWith("/pair")) {
+    await pairMember(message, env);
+    return;
+  }
+
+  if (text.startsWith("/status")) {
+    await sendStatus(chat.id, env);
+    return;
+  }
+
+  const pair = await env.DB.prepare("SELECT * FROM pairs WHERE chat_id = ?")
+    .bind(String(chat.id)).first();
+  if (!pair) return;
+
+  const userId = String(sender.id);
+  if (userId !== pair.member_a_id && userId !== pair.member_b_id) return;
+
+  const day = new Date().toISOString().slice(0, 10);
+  await env.DB.prepare(
+    "INSERT OR IGNORE INTO daily_activity (pair_id, user_id, activity_day) VALUES (?, ?, ?)"
+  ).bind(pair.id, userId, day).run();
+
+  const rows = await env.DB.prepare(
+    "SELECT user_id FROM daily_activity WHERE pair_id = ? AND activity_day = ?"
+  ).bind(pair.id, day).all();
+
+  const activeIds = new Set((rows.results || []).map(row => row.user_id));
+  if (activeIds.has(pair.member_a_id) && activeIds.has(pair.member_b_id)) {
+    await completeDay(pair, day, env);
+  }
+}
+
+async function pairMember(message, env) {
+  const chat = message.chat;
+  const sender = message.from;
+  const chatId = String(chat.id);
+  const userId = String(sender.id);
+  const displayName = [sender.first_name, sender.last_name].filter(Boolean).join(" ") || sender.username || "Участник";
+
+  const existing = await env.DB.prepare("SELECT * FROM pairs WHERE chat_id = ?")
+    .bind(chatId).first();
+
+  if (existing) {
+    await sendMessage(env, chat.id, "В этой группе огонёк уже настроен 🔥 Напишите /status.");
+    return;
+  }
+
+  const pending = await env.DB.prepare("SELECT * FROM pending_pairs WHERE chat_id = ?")
+    .bind(chatId).first();
+
+  if (!pending) {
+    await env.DB.prepare(
+      "INSERT OR REPLACE INTO pending_pairs (chat_id, chat_title, first_user_id, first_user_name) VALUES (?, ?, ?, ?)"
+    ).bind(chatId, chat.title || "Telegram group", userId, displayName).run();
+    await sendMessage(env, chat.id,
+      `${displayName} начал создание огонька! 🔥 Теперь второму человеку нужно отправить /pair в этой группе.`
+    );
+    return;
+  }
+
+  if (pending.first_user_id === userId) {
+    await sendMessage(env, chat.id, "Теперь пусть второй участник отправит /pair 🔥");
+    return;
+  }
+
+  await env.DB.prepare(
+    "INSERT INTO pairs (chat_id, chat_title, member_a_id, member_a_name, member_b_id, member_b_name) VALUES (?, ?, ?, ?, ?, ?)"
+  ).bind(chatId, pending.chat_title, pending.first_user_id, pending.first_user_name, userId, displayName).run();
+
+  await env.DB.prepare("DELETE FROM pending_pairs WHERE chat_id = ?").bind(chatId).run();
+
+  await sendMessage(env, chat.id,
+    `Готово! 🔥 Огонёк создан между ${pending.first_user_name} и ${displayName}. Теперь каждый день отправляйте друг другу сообщения в этой группе — я буду считать общие дни автоматически.`
+  );
+}
+
+async function sendStatus(chatId, env) {
+  const pair = await env.DB.prepare("SELECT * FROM pairs WHERE chat_id = ?")
+    .bind(String(chatId)).first();
+
+  if (!pair) {
+    await sendMessage(env, chatId, "Огонёк ещё не настроен. Оба участника должны по очереди отправить /pair 🔥");
+    return;
+  }
+
+  await sendMessage(env, chatId,
+    `🔥 Огонёк: ${pair.member_a_name} + ${pair.member_b_name}\nТекущая серия: ${pair.current_streak} ${pluralDays(pair.current_streak)}\nЛучшая серия: ${pair.best_streak} ${pluralDays(pair.best_streak)}\nПоследний общий день: ${pair.last_completed_day || "пока нет"}`
+  );
+}
+
+async function completeDay(pair, day, env) {
+  if (pair.last_completed_day === day) return;
+
+  const yesterday = new Date(Date.parse(day + "T00:00:00Z") - DAY_MS).toISOString().slice(0, 10);
+  const nextStreak = pair.last_completed_day === yesterday ? pair.current_streak + 1 : 1;
+  const best = Math.max(pair.best_streak, nextStreak);
+
+  const result = await env.DB.prepare(
+    "UPDATE pairs SET current_streak = ?, best_streak = ?, last_completed_day = ? WHERE id = ? AND (last_completed_day IS NULL OR last_completed_day != ?)"
+  ).bind(nextStreak, best, day, pair.id, day).run();
+
+  if (result.meta?.changes) {
+    await sendMessage(env, pair.chat_id,
+      `🔥 Огонёк сохранён! У вас уже ${nextStreak} ${pluralDays(nextStreak)} вместе!`
+    );
+  }
+}
+
+function pluralDays(number) {
+  const n = number % 100;
+  if (n >= 11 && n <= 14) return "дней";
+  switch (number % 10) {
+    case 1: return "день";
+    case 2:
+    case 3:
+    case 4: return "дня";
+    default: return "дней";
+  }
+}
+
+async function sendMessage(env, chatId, text) {
+  const response = await fetch(
+    `https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ chat_id: chatId, text }),
+    }
+  );
+  if (!response.ok) console.error("Telegram sendMessage failed:", await response.text());
+}
