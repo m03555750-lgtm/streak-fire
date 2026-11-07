@@ -41,6 +41,20 @@ export default {
       });
     }
 
+    if (request.method === "GET" && url.pathname === "/story") {
+      if (!env.DB || !env.TELEGRAM_WEBHOOK_SECRET) return new Response("Story unavailable", { status: 503 });
+      const chatId = url.searchParams.get("chat") || "";
+      const expires = Number(url.searchParams.get("exp") || 0);
+      const signature = url.searchParams.get("sig") || "";
+      if (!chatId || !Number.isInteger(expires) || expires < Math.floor(Date.now() / 1000) || expires > Math.floor(Date.now() / 1000) + 86400 ||
+          !(await verifyStorySignature(env.TELEGRAM_WEBHOOK_SECRET, chatId, expires, signature))) {
+        return new Response("Ссылка недействительна или устарела. Создай новую командой /story.", { status: 403 });
+      }
+      const pair = await env.DB.prepare("SELECT * FROM pairs WHERE chat_id = ?").bind(chatId).first();
+      if (!pair) return new Response("Огонёк не найден.", { status: 404 });
+      return new Response(renderStoryPage(pair), { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
+    }
+
     if (request.method === "POST" && url.pathname === "/telegram") {
       if (!env.TELEGRAM_BOT_TOKEN || !env.TELEGRAM_WEBHOOK_SECRET || !env.DB) {
         return new Response("Missing configuration", { status: 500 });
@@ -124,6 +138,10 @@ async function handleMessage(message, env) {
   }
   if (text.startsWith("/pair")) {
     await pairMember(message, env);
+    return;
+  }
+  if (text.startsWith("/story")) {
+    await sendStoryLink(chat.id, env);
     return;
   }
   if (text.startsWith("/status")) {
@@ -265,4 +283,35 @@ async function updateGroupTitle(env, chatId, originalTitle, streak) {
     return false;
   }
   return true;
+}
+
+
+async function signStoryPayload(secret, chatId, expires) {
+  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const bytes = new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(`${chatId}:${expires}`)));
+  return Array.from(bytes, byte => byte.toString(16).padStart(2, "0")).join("");
+}
+async function verifyStorySignature(secret, chatId, expires, signature) {
+  const expected = await signStoryPayload(secret, chatId, expires);
+  if (signature.length !== expected.length) return false;
+  let diff = 0;
+  for (let i = 0; i < expected.length; i++) diff |= expected.charCodeAt(i) ^ signature.charCodeAt(i);
+  return diff === 0;
+}
+async function sendStoryLink(chatId, env) {
+  const pair = await env.DB.prepare("SELECT * FROM pairs WHERE chat_id = ?").bind(String(chatId)).first();
+  if (!pair) { await sendMessage(env, chatId, "Сначала создайте общий огонёк командой /pair 🔥"); return; }
+  const expires = Math.floor(Date.now() / 1000) + 86400;
+  const signature = await signStoryPayload(env.TELEGRAM_WEBHOOK_SECRET, String(chatId), expires);
+  const link = `${WORKER_URL}/story?chat=${encodeURIComponent(chatId)}&exp=${expires}&sig=${signature}`;
+  await sendMessage(env, chatId, `🔥 Ваша карточка огонька готова!\\n\\nОткройте ссылку на телефоне, сделайте скриншот карточки и добавьте его в историю Telegram:\\n${link}\\n\\nСсылка действует 24 часа.`);
+}
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>"']/g, char => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" })[char]);
+}
+function renderStoryPage(pair) {
+  const a=escapeHtml(pair.member_a_name), b=escapeHtml(pair.member_b_name), group=escapeHtml(pair.chat_title || "Наша группа");
+  const days=Number(pair.current_streak)||0, best=Number(pair.best_streak)||0;
+  return `<!doctype html><html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1"><title>STREAK 🔥</title><style>
+  *{box-sizing:border-box}html,body{margin:0;min-height:100%;font-family:Arial,sans-serif;background:#100d1c;color:white}body{display:flex;justify-content:center;align-items:center;padding:14px}.card{position:relative;width:min(100%,430px);aspect-ratio:9/16;overflow:hidden;border-radius:28px;padding:12% 8%;display:flex;flex-direction:column;align-items:center;justify-content:space-between;text-align:center;background:radial-gradient(ellipse at 50% 42%,#71341f 0,#311b35 42%,#100d1c 78%);border:1px solid #ffffff24}.glow{position:absolute;width:75%;aspect-ratio:1;border-radius:50%;top:27%;background:#ff6a24;filter:blur(80px);opacity:.35}.top,.middle,.bottom{position:relative;z-index:1}.brand{font-size:14px;letter-spacing:5px;font-weight:bold;color:#ffd2a1}.group{font-size:15px;color:#f4d9cb;margin-top:14px}.fire{font-size:clamp(100px,27vw,150px);line-height:1.2;filter:drop-shadow(0 0 22px #ff742d)}.days{font-size:clamp(58px,16vw,82px);font-weight:900;line-height:1;color:#fff}.label{font-size:19px;color:#ffd8c0;margin-top:10px}.names{font-size:22px;font-weight:bold;line-height:1.5;margin-top:28px}.heart{color:#ff8064}.best{margin-top:28px;padding:12px 20px;border:1px solid #ffffff35;border-radius:30px;background:#ffffff12;font-size:16px}.bottom{font-size:13px;letter-spacing:3px;color:#f5c5a9}.hint{max-width:430px;text-align:center;color:#d9cbd5;font-size:13px;padding:12px 8px 0}</style><body><div><main class="card"><div class="glow"></div><header class="top"><div class="brand">STREAK</div><div class="group">${group}</div></header><section class="middle"><div class="fire">🔥</div><div class="days">${days}</div><div class="label">дней вместе</div><div class="names">${a}<br><span class="heart">❤️</span><br>${b}</div><div class="best">🏆 Рекорд: ${best} дн.</div></section><footer class="bottom">НАШ ОГОНЁК НЕ ГАСНЕТ</footer></main><div class="hint">Сделай скриншот карточки и добавь его в историю Telegram 🔥</div></div></body></html>`;
 }
