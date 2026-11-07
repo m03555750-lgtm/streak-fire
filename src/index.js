@@ -42,7 +42,7 @@ export default {
       });
     }
 
-    if (request.method === "GET" && ["/story", "/instagram-story"].includes(url.pathname)) {
+    if (request.method === "GET" && url.pathname === "/story") {
       if (!env.DB || !env.TELEGRAM_WEBHOOK_SECRET) return new Response("Story unavailable", { status: 503 });
       const chatId = url.searchParams.get("chat") || "";
       const expires = Number(url.searchParams.get("exp") || 0);
@@ -143,10 +143,6 @@ async function handleMessage(message, env) {
   }
   if (text.startsWith("/story")) {
     await sendStoryLink(chat.id, env, "telegram");
-    return;
-  }
-  if (text.startsWith("/instagram")) {
-    await sendStoryLink(chat.id, env, "instagram");
     return;
   }
   if (text.startsWith("/status")) {
@@ -303,7 +299,7 @@ async function verifyStorySignature(secret, chatId, expires, signature) {
   for (let i = 0; i < expected.length; i++) diff |= expected.charCodeAt(i) ^ signature.charCodeAt(i);
   return diff === 0;
 }
-async function sendStoryLink(chatId, env, platform = "telegram") {
+async function sendStoryLink(chatId, env) {
   const pair = await env.DB.prepare("SELECT * FROM pairs WHERE chat_id = ?").bind(String(chatId)).first();
   if (!pair) {
     await sendMessage(env, chatId, "Сначала создайте общий огонёк командой /pair 🔥");
@@ -311,18 +307,15 @@ async function sendStoryLink(chatId, env, platform = "telegram") {
   }
   const expires = Math.floor(Date.now() / 1000) + 86400;
   const signature = await signStoryPayload(env.TELEGRAM_WEBHOOK_SECRET, String(chatId), expires);
-  const path = platform === "instagram" ? "/instagram-story" : "/story";
-  const link = `${WORKER_URL}${path}?chat=${encodeURIComponent(chatId)}&exp=${expires}&sig=${signature}`;
+  const link = `${WORKER_URL}/story?chat=${encodeURIComponent(chatId)}&exp=${expires}&sig=${signature}`;
   const response = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
       chat_id: chatId,
-      text: platform === "instagram"
-        ? "📸 Карточка для Instagram Stories готова!\n\nОткройте её, создайте видео и нажмите «Поделиться», затем выберите Instagram. Ссылка действует 24 часа."
-        : "🔥 Ваша карточка огонька готова!\n\nНажмите кнопку ниже, чтобы открыть её. Ссылка действует 24 часа.",
+      text: "🔥 Ваша карточка огонька готова!\n\nНажмите кнопку ниже, чтобы открыть её. Ссылка действует 24 часа.",
       reply_markup: {
-        inline_keyboard: [[{ text: platform === "instagram" ? "📸 Открыть карточку Instagram" : "🔥 Открыть карточку", url: link }]]
+        inline_keyboard: [[{ text: "🔥 Открыть карточку", url: link }]]
       }
     })
   });
@@ -347,7 +340,7 @@ function renderStoryPage(pair) {
   #status{font-size:13px;color:#e5c9bd;min-height:36px;padding:10px 4px 0;line-height:1.4}
   video{display:none;width:100%;border-radius:16px;margin-top:12px}
   </style><body><main class="wrap"><div class="preview"><canvas id="card" width="720" height="1280"></canvas></div>
-  <div class="buttons"><button id="make">🎬 Создать анимированное видео</button><button id="share" class="secondary" disabled>📸 Поделиться в Stories</button><button id="download" class="secondary" disabled>⬇️ Скачать видео</button></div>
+  <div class="buttons"><button id="make">🎬 Создать анимированное видео</button><button id="share" class="secondary" disabled>📲 Поделиться / в историю</button><button id="download" class="secondary" disabled>⬇️ Скачать видео</button></div>
   <video id="result" controls playsinline></video><div id="status">Нажми «Создать анимированное видео». Через несколько секунд появится готовый ролик.</div></main>
   <script>
   const names=[${a},${b}], group=${group}, days=${days}, best=${best};
@@ -397,7 +390,7 @@ function renderStoryPage(pair) {
       stream.getTracks().forEach(track=>track.stop());videoBlob=new Blob(chunks,{type:mime});
       if(videoUrl)URL.revokeObjectURL(videoUrl);videoUrl=URL.createObjectURL(videoBlob);
       result.src=videoUrl;result.style.display='block';share.disabled=false;download.disabled=false;make.disabled=false;
-      status.textContent='Готово! Нажми «Поделиться в Stories» и выбери Instagram. Если Instagram не появится в меню, сохрани видео и добавь его через создание истории вручную.';
+      status.textContent='Готово! Нажми «Поделиться / в историю» и выбери Telegram. Если Telegram не предложит публикацию истории, сохрани видео и добавь его через создание истории вручную.';
     };
     recorder.start();setTimeout(()=>{if(recorder.state==='recording')recorder.stop()},7000);
   });
@@ -409,8 +402,8 @@ function renderStoryPage(pair) {
     try{
       if(navigator.share&&(!navigator.canShare||navigator.canShare({files:[file]}))){
         await navigator.share({files:[file],title:'Наш огонёк 🔥',text:'Наш STREAK — '+days+' дней вместе!'});
-      }else{download.click();status.textContent='Видео скачано. Открой Instagram → Создать историю → выбери это видео из галереи.'}
-    }catch(e){if(e.name!=='AbortError')status.textContent='Не удалось открыть меню отправки. Скачай видео и добавь его в Instagram Stories вручную.'}
+      }else{download.click();status.textContent='Видео скачано. Открой Telegram → Истории → выбери это видео из галереи.'}
+    }catch(e){if(e.name!=='AbortError')status.textContent='Не удалось открыть меню отправки. Скачай видео и добавь его в историю вручную.'}
   });
   </script></body></html>`;
 }
