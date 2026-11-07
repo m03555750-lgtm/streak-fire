@@ -9,7 +9,6 @@ export default {
       return new Response("STREAK bot is running 🔥");
     }
 
-    // One-time browser setup page. The secret is submitted in the POST body, not the URL.
     if (url.pathname === "/setup" && request.method === "GET") {
       return new Response(`<!doctype html><html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>STREAK setup</title><body style="font:16px Arial;max-width:480px;margin:40px auto;padding:16px"><h2>Подключение STREAK 🔥</h2><p>Введи значение TELEGRAM_WEBHOOK_SECRET, которое ты сохранил в Cloudflare.</p><form method="post" action="/setup"><input name="secret" type="password" required autocomplete="off" placeholder="Webhook secret" style="box-sizing:border-box;width:100%;padding:12px;margin:12px 0"><button style="padding:12px 18px">Подключить Telegram</button></form></body></html>`, {
         headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" }
@@ -65,7 +64,51 @@ export default {
     }
     return new Response("Not found", { status: 404 });
   },
+
+  async scheduled(controller, env, ctx) {
+    ctx.waitUntil(sendDailyReminders(env));
+  },
 };
+
+async function sendDailyReminders(env) {
+  if (!env.DB || !env.TELEGRAM_BOT_TOKEN) {
+    console.error("Reminder skipped: missing DB or TELEGRAM_BOT_TOKEN");
+    return;
+  }
+
+  const day = new Date().toISOString().slice(0, 10);
+  const result = await env.DB.prepare(
+    `SELECT p.id, p.chat_id, p.member_a_id, p.member_a_name, p.member_b_id, p.member_b_name,
+            COUNT(DISTINCT a.user_id) AS active_count
+       FROM pairs p
+       LEFT JOIN daily_activity a ON a.pair_id = p.id AND a.activity_day = ?
+      WHERE p.last_completed_day IS NULL OR p.last_completed_day != ?
+      GROUP BY p.id`
+  ).bind(day, day).all();
+
+  for (const pair of result.results || []) {
+    if (Number(pair.active_count) !== 1) continue;
+
+    const active = await env.DB.prepare(
+      "SELECT user_id FROM daily_activity WHERE pair_id = ? AND activity_day = ? LIMIT 1"
+    ).bind(pair.id, day).first();
+    if (!active) continue;
+
+    const inactiveName = active.user_id === pair.member_a_id
+      ? pair.member_b_name
+      : pair.member_a_name;
+
+    const claimed = await env.DB.prepare(
+      "UPDATE pairs SET reminder_sent_day = ? WHERE id = ? AND (reminder_sent_day IS NULL OR reminder_sent_day != ?)"
+    ).bind(day, pair.id, day).run();
+
+    if (claimed.meta?.changes) {
+      await sendMessage(env, pair.chat_id,
+        `⏰ Напоминание об огоньке! 🔥 Сегодня уже есть активность от одного участника. ${inactiveName}, отправь сообщение в группу до конца дня, чтобы сохранить вашу серию!`
+      );
+    }
+  }
+}
 
 async function handleMessage(message, env) {
   const chat = message.chat;
@@ -98,6 +141,7 @@ async function handleMessage(message, env) {
   await env.DB.prepare(
     "INSERT OR IGNORE INTO daily_activity (pair_id, user_id, activity_day) VALUES (?, ?, ?)"
   ).bind(pair.id, userId, day).run();
+
   const rows = await env.DB.prepare(
     "SELECT user_id FROM daily_activity WHERE pair_id = ? AND activity_day = ?"
   ).bind(pair.id, day).all();
@@ -135,7 +179,7 @@ async function pairMember(message, env) {
   ).bind(chatId, pending.chat_title, pending.first_user_id, pending.first_user_name, userId, displayName).run();
   await env.DB.prepare("DELETE FROM pending_pairs WHERE chat_id = ?").bind(chatId).run();
   await sendMessage(env, chat.id,
-    `Готово! 🔥 Огонёк создан между ${pending.first_user_name} и ${displayName}. Теперь каждый день отправляйте друг другу сообщения в этой группе — я буду считать общие дни автоматически.`
+    `╔══════════════════╗\n       🔥 STREAK ЗАПУЩЕН!\n╚══════════════════╝\n${pending.first_user_name} ❤️ ${displayName}\n\nКаждый день пишите хотя бы одно сообщение в этой группе. Команда /status покажет ваш огонёк.`
   );
 }
 
@@ -145,8 +189,23 @@ async function sendStatus(chatId, env) {
     await sendMessage(env, chatId, "Огонёк ещё не настроен. Оба участника должны по очереди отправить /pair 🔥");
     return;
   }
+
+  const today = new Date().toISOString().slice(0, 10);
+  const activity = await env.DB.prepare(
+    "SELECT user_id FROM daily_activity WHERE pair_id = ? AND activity_day = ?"
+  ).bind(pair.id, today).all();
+  const activeIds = new Set((activity.results || []).map(row => row.user_id));
+  const aDone = activeIds.has(pair.member_a_id);
+  const bDone = activeIds.has(pair.member_b_id);
+  const progress = (aDone ? "🟩" : "⬜") + (bDone ? "🟩" : "⬜");
+  const state = aDone && bDone
+    ? "Оба уже отметились — огонёк сохранён на сегодня! 🔥"
+    : "Сегодняшняя активность: " + progress + "\n" +
+      (aDone ? "✅" : "▫️") + " " + pair.member_a_name + "\n" +
+      (bDone ? "✅" : "▫️") + " " + pair.member_b_name;
+
   await sendMessage(env, chatId,
-    `🔥 Огонёк: ${pair.member_a_name} + ${pair.member_b_name}\nТекущая серия: ${pair.current_streak} ${pluralDays(pair.current_streak)}\nЛучшая серия: ${pair.best_streak} ${pluralDays(pair.best_streak)}\nПоследний общий день: ${pair.last_completed_day || "пока нет"}`
+    `╔══════════════════╗\n          🔥 ВАШ ОГОНЁК\n╚══════════════════╝\n\n🔥 ${pair.current_streak} ${pluralDays(pair.current_streak)} подряд\n🏆 Рекорд: ${pair.best_streak} ${pluralDays(pair.best_streak)}\n\n${state}\n\n📅 Последний общий день: ${pair.last_completed_day || "пока нет"}`
   );
 }
 
@@ -159,7 +218,9 @@ async function completeDay(pair, day, env) {
     "UPDATE pairs SET current_streak = ?, best_streak = ?, last_completed_day = ? WHERE id = ? AND (last_completed_day IS NULL OR last_completed_day != ?)"
   ).bind(nextStreak, best, day, pair.id, day).run();
   if (result.meta?.changes) {
-    await sendMessage(env, pair.chat_id, `🔥 Огонёк сохранён! У вас уже ${nextStreak} ${pluralDays(nextStreak)} вместе!`);
+    await sendMessage(env, pair.chat_id,
+      `🔥 ОГОНЁК СОХРАНЁН! 🔥\n\n${"🔥".repeat(Math.min(nextStreak, 10))}\n\nУ вас уже ${nextStreak} ${pluralDays(nextStreak)} вместе!\n🏆 Лучший результат: ${best} ${pluralDays(best)}`
+    );
   }
 }
 
