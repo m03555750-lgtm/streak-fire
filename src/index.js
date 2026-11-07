@@ -378,7 +378,7 @@ function renderStoryPage(pair) {
   make.addEventListener('click',async()=>{
     if(!canvas.captureStream||!window.MediaRecorder){status.textContent='Этот браузер не умеет создавать видео. Попробуй Chrome на телефоне.';return}
     const stream=canvas.captureStream(30);
-    const mime=['video/webm;codecs=vp9','video/webm;codecs=vp8','video/webm'].find(type=>MediaRecorder.isTypeSupported(type));
+    const mime=['video/mp4;codecs=avc1.42E01E','video/mp4','video/webm;codecs=vp9','video/webm;codecs=vp8','video/webm'].find(type=>MediaRecorder.isTypeSupported(type));
     if(!mime){status.textContent='Браузер не поддерживает запись видео в подходящем формате.';return}
     const chunks=[];let recorder;
     try{recorder=new MediaRecorder(stream,{mimeType:mime});}catch(e){status.textContent='Не удалось запустить запись видео.';return}
@@ -394,10 +394,10 @@ function renderStoryPage(pair) {
     recorder.start();setTimeout(()=>{if(recorder.state==='recording')recorder.stop()},7000);
   });
   download.addEventListener('click',()=>{
-    if(!videoBlob)return;const a=document.createElement('a');a.href=videoUrl;a.download='streak-fire.webm';a.click();
+    if(!videoBlob)return;const a=document.createElement('a');a.href=videoUrl;a.download='streak-fire.'+(videoBlob.type.includes('mp4')?'mp4':'webm');a.click();
   });
   share.addEventListener('click',async()=>{
-    if(!videoBlob)return;const file=new File([videoBlob],'streak-fire.webm',{type:videoBlob.type});
+    if(!videoBlob)return;const ext=videoBlob.type.includes('mp4')?'mp4':'webm';const file=new File([videoBlob],'streak-fire.'+ext,{type:videoBlob.type});
     try{
       if(navigator.share&&(!navigator.canShare||navigator.canShare({files:[file]}))){
         await navigator.share({files:[file],title:'Наш огонёк 🔥',text:'Наш STREAK — '+days+' дней вместе!'});
